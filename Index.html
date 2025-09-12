@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TTS App with Firebase + Audio Storage</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f9;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      width: 90%;
+      max-width: 1000px;
+      background: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    h1, h2 {
+      text-align: center;
+      color: #333;
+    }
+    textarea {
+      width: 100%;
+      height: 200px;
+      margin-top: 15px;
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      resize: vertical;
+    }
+    .controls, .auth-box, .project-controls {
+      margin-top: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+    }
+    input[type="email"], input[type="password"] {
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      width: 100%;
+    }
+    .btn {
+      background: #007bff;
+      color: #fff;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 15px;
+      transition: background 0.3s;
+    }
+    .btn:hover { background: #0056b3; }
+    label.btn { display: inline-block; }
+    .settings {
+      margin-top: 20px;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #fafafa;
+    }
+    .settings label { display: block; margin-top: 10px; font-weight: bold; }
+    select, input[type="range"] { width: 100%; margin-top: 5px; padding: 6px; }
+    #ttsSection { display: none; } /* hidden until login */
+    .project-list {
+      margin-top: 20px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #f9f9f9;
+    }
+    .project-item {
+      padding: 8px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .project-item:last-child { border-bottom: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Text-to-Speech App 🔊</h1>
+
+    <!-- Authentication Section -->
+    <div id="authSection">
+      <h2>Login / Sign Up</h2>
+      <div class="auth-box">
+        <input type="email" id="email" placeholder="Email">
+        <input type="password" id="password" placeholder="Password">
+        <button class="btn" onclick="signUp()">Sign Up</button>
+        <button class="btn" onclick="login()">Login</button>
+        <button class="btn" onclick="googleLogin()">Login with Google</button>
+      </div>
+    </div>
+
+    <!-- TTS Section (hidden until logged in) -->
+    <div id="ttsSection">
+      <h2>Welcome! Use TTS below:</h2>
+      <textarea id="textInput" placeholder="Type or paste your text here (max 10,000 words)..."></textarea>
+      
+      <div class="controls">
+        <button class="btn" onclick="speakAndRecord()">Play & Record</button>
+        <button class="btn" onclick="stopSpeech()">Stop</button>
+        <button class="btn" onclick="clearText()">Clear</button>
+        <button class="btn" onclick="logout()">Logout</button>
+      </div>
+
+      <div class="settings">
+        <label for="voiceSelect">Choose Voice:</label>
+        <select id="voiceSelect"></select>
+
+        <label for="rateRange">Speed (Rate): <span id="rateValue">1</span></label>
+        <input type="range" id="rateRange" min="0.5" max="2" step="0.1" value="1">
+
+        <label for="pitchRange">Pitch: <span id="pitchValue">1</span></label>
+        <input type="range" id="pitchRange" min="0.5" max="2" step="0.1" value="1">
+      </div>
+
+      <div class="project-controls">
+        <button class="btn" onclick="saveProject()">Save Project</button>
+        <button class="btn" onclick="loadProjects()">Load My Projects</button>
+      </div>
+
+      <div class="project-list" id="projectList"></div>
+    </div>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+
+  <script>
+    // ==============================
+    // 🔥 Firebase Config
+    // ==============================
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    const storage = firebase.storage();
+    let currentUser = null;
+
+    // ==============================
+    // 🔑 Auth Functions
+    // ==============================
+    function signUp() {
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      auth.createUserWithEmailAndPassword(email, password)
+        .then(() => alert("Account created successfully!"))
+        .catch(err => alert(err.message));
+    }
+    function login() {
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      auth.signInWithEmailAndPassword(email, password)
+        .then(() => showTTS())
+        .catch(err => alert(err.message));
+    }
+    function googleLogin() {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      auth.signInWithPopup(provider)
+        .then(() => showTTS())
+        .catch(err => alert(err.message));
+    }
+    function logout() {
+      auth.signOut().then(() => {
+        currentUser = null;
+        document.getElementById("ttsSection").style.display = "none";
+        document.getElementById("authSection").style.display = "block";
+      });
+    }
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        currentUser = user;
+        showTTS();
+      }
+    });
+    function showTTS() {
+      document.getElementById("authSection").style.display = "none";
+      document.getElementById("ttsSection").style.display = "block";
+    }
+
+    // ==============================
+    // 🔊 Text-to-Speech + Recorder
+    // ==============================
+    let synth = window.speechSynthesis;
+    let voices = [];
+    let currentUtterance = null;
+    const voiceSelect = document.getElementById("voiceSelect");
+    const rateRange = document.getElementById("rateRange");
+    const pitchRange = document.getElementById("pitchRange");
+    const rateValue = document.getElementById("rateValue");
+    const pitchValue = document.getElementById("pitchValue");
+
+    function populateVoices() {
+      voices = synth.getVoices();
+      voiceSelect.innerHTML = "";
+      voices.forEach((voice, i) => {
+        const option = document.createElement("option");
+        option.value = i;
+        option.textContent = `${voice.name} (${voice.lang}) ${voice.default ? " [default]" : ""}`;
+        voiceSelect.appendChild(option);
+      });
+    }
+    populateVoices();
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+      speechSynthesis.onvoiceschanged = populateVoices;
+    }
+
+    // Recorder Setup
+    let mediaRecorder, recordedChunks = [];
+    async function setupRecorder() {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = uploadAudio;
+    }
+
+    async function speakAndRecord() {
+      let text = document.getElementById("textInput").value;
+      if (!text.trim()) return alert("Please enter text!");
+      if (!mediaRecorder) await setupRecorder();
+
+      // Start recording microphone
+      recordedChunks = [];
+      mediaRecorder.start();
+
+      if (synth.speaking) synth.cancel();
+      currentUtterance = new SpeechSynthesisUtterance(text);
+      if (voices[voiceSelect.value]) currentUtterance.voice = voices[voiceSelect.value];
+      currentUtterance.rate = parseFloat(rateRange.value);
+      currentUtterance.pitch = parseFloat(pitchRange.value);
+
+      currentUtterance.onend = () => { mediaRecorder.stop(); };
+      synth.speak(currentUtterance);
+    }
+
+    function stopSpeech() {
+      if (synth.speaking) synth.cancel();
+      if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.stop();
+    }
+    function clearText() { document.getElementById("textInput").value = ""; stopSpeech(); }
+
+    // Upload Recorded Audio
+    async function uploadAudio() {
+      if (!currentUser) return;
+      const blob = new Blob(recordedChunks, { type: "audio/webm" });
+      const fileRef = storage.ref().child(`users/${currentUser.uid}/audio/${Date.now()}.webm`);
+      await fileRef.put(blob);
+      const url = await fileRef.getDownloadURL();
+      alert("Audio saved! Link: " + url);
+      // Save link in Firestore project
+      await db.collection("users").doc(currentUser.uid).collection("projects").add({
+        audioUrl: url,
+        text: document.getElementById("textInput").value,
+        voice: voiceSelect.value,
+        rate: rateRange.value,
+        pitch: pitchRange.value,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    // ==============================
+    // 📂 Load Saved Projects
+    // ==============================
+    async function saveProject() {
+      if (!currentUser) return alert("Login required.");
+      await db.collection("users").doc(currentUser.uid).collection("projects").add({
+        text: document.getElementById("textInput").value,
+        voice: voiceSelect.value,
+        rate: rateRange.value,
+        pitch: pitchRange.value,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      alert("Project saved!");
+    }
+
+    async function loadProjects() {
+      if (!currentUser) return alert("Login required.");
+      const snapshot = await db.collection("users").doc(currentUser.uid).collection("projects").orderBy("timestamp", "desc").get();
+      const projectList = document.getElementById("projectList");
+      projectList.innerHTML = "<h3>Your Projects</h3>";
+      snapshot.forEach(doc => {
+        const proj = doc.data();
+        const div = document.createElement("div");
+        div.className = "project-item";
+        div.innerHTML = `
+          <span>${new Date(proj.timestamp?.toDate()).toLocaleString()}</span>
+          ${proj.audioUrl ? `<a href="${proj.audioUrl}" target="_blank">Download Audio</a>` : ""}
+        `;
+        projectList.appendChild(div);
+      });
+    }
+  </script>
+</body>
+</html>
